@@ -1,0 +1,85 @@
+# PERIDYNAMIC MODEL OF FRICTION
+# PMMA-PMMA - Tian2016 (1st batch, no load)
+
+#--------------------------------------------------------------------------
+# INITIALIZATION
+
+units			si
+# International System Units
+boundary        p p s
+# periodic boundary conditions (x,y), fixed (z)
+atom_style      peri
+# atom_style peri --> mass, volume
+atom_modify     map array
+# we need it as an option for storing info about positions
+neighbor        0.0010 bin
+# depth of the skin in bin interaction
+
+#--------------------------------------------------------------------------
+# GEOMETRY SETUP
+
+lattice         sc 0.00025
+# notice that units are SI
+region          trialbox block 0 0.009 0 0.005 0 0.010 units box
+# region <ID> block xlo xhi ylo yhi zlo zhi units lattice/box
+# NB: unless otherwise stated, units are expressed in lattice units
+create_box      2 trialbox
+# create a box with 4 kinds of atoms
+region          fixedPMMA block INF INF INF INF INF 0.003 units box
+# our fixed block of PMMA
+region          mobilePMMA block 0.002 0.005 0.001 0.004 0.0030001 0.006 units box
+# our mobile block of PMMA
+
+create_atoms    1 region fixedPMMA
+# fill the region with atoms
+create_atoms    2 region mobilePMMA
+# fill the region with atoms
+
+group	        fixed region mobilePMMA
+group	        mobile region fixedPMMA
+# group atoms in a collection which can be later treated as a whole
+# group <ID> <region> <regionID>
+
+#--------------------------------------------------------------------------
+# POTENTIAL
+
+pair_style      peri/pmb
+# the potential used --> prototype microelastic brittle
+pair_coeff      *   *       7.062e22             0.0007501       0.013    0.25
+# pair_coeff    *   *   <SpringConstant>   <horizon>=3*lattice   <s00>   <alpha>
+
+#--------------------------------------------------------------------------
+# PROPERTIES SETUP
+
+set             group all density 1180
+# set PMMA density value
+set             group all volume 1.5625e-11
+# set the volume for each particle
+velocity        all set 0.0 0.0 0.0 sum no units box
+# our particles are still
+#velocity	    mobile set 0.0005 0.0 0.0 sum yes units box
+# velocity <groupID> <style> <args> <keyword>
+
+#--------------------------------------------------------------------------
+# FIXES AND COMPUTATIONS
+
+fix             1 all nve
+# particles trajectories
+
+#--------------------------------------------------------------------------
+# RUN
+
+timestep        0.001
+# timestep size (time units)
+thermo          100
+# output thermodynamics every N timesteps
+
+dump            1 all custom 100 dump.peri id type x y z vx vy vz
+# dump a file with all the information
+
+dump			2 all image 50 image.*.jpg type type axes yes 0.8 0.02 view 80 -30 adiam 0.0006
+dump_modify		2 pad 4
+# pad arg = Nchar --> # of characters to convert timestep to
+
+run             500
+# number of timesteps
