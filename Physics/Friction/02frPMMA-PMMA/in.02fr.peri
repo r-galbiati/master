@@ -1,0 +1,117 @@
+# PERIDYNAMIC MODEL OF FRICTION
+# PMMA-PMMA - Tian2016 (1st batch, load applied)
+
+#--------------------------------------------------------------------------
+# INITIALIZATION
+
+units			si
+# International System Units
+# NB: forces will be in Newton
+boundary        p p f
+# periodic boundary conditions (x,y), fixed (z)
+atom_style      peri
+# atom_style peri --> mass, volume
+atom_modify     map array
+# we need it as an option for storing info about positions
+neighbor        0.0010 bin
+# depth of the skin in bin interaction
+
+#--------------------------------------------------------------------------
+# GEOMETRY SETUP
+
+lattice         sc 0.00025
+# notice that units are SI
+region          trialbox block 0 0.0045 0 0.0035 0 0.008 units box
+# region <ID> block xlo xhi ylo yhi zlo zhi units lattice/box
+# NB: unless otherwise stated, units are expressed in lattice units
+create_box      4 trialbox
+# create a box with 4 kinds of atoms
+region          constraintPMMA block INF INF INF INF INF 0.0005 units box
+# constraint region
+region          fixedPMMA block INF INF INF INF 0.0005001 0.003 units box
+# our fixed block of PMMA
+region          mobilePMMA block 0.001 0.003 0.001 0.0025 0.0030001 0.00575 units box
+# our mobile block of PMMA
+region          loadPMMA block 0.001 0.003 0.001 0.0025 0.0057501 0.006 units box
+# loading region
+
+create_atoms    1 region fixedPMMA
+# fill the region with atoms
+create_atoms    2 region mobilePMMA
+# fill the region with atoms
+create_atoms    3 region constraintPMMA
+# fill the region with atoms
+create_atoms    4 region loadPMMA
+# fill the region with atoms
+
+group	        fixed region fixedPMMA
+group	        mobile region mobilePMMA
+group	        constraint region constraintPMMA
+group           load region loadPMMA
+# group atoms in a collection which can be later treated as a whole
+# group <ID> <region> <regionID>
+
+group           upper union mobile load
+# upper --> the upper specimen as a whole
+group           lower union fixed constraint
+# lower --> the lower specimen as a whole
+
+#--------------------------------------------------------------------------
+# POTENTIAL
+
+pair_style      peri/pmb
+# the potential used --> prototype microelastic brittle
+pair_coeff      *   *       7.062e22             0.0007501       0.013    0.25
+# pair_coeff    *   *   <SpringConstant>   <horizon>=3*lattice   <s00>   <alpha>
+
+#--------------------------------------------------------------------------
+# PROPERTIES SETUP
+
+set             group all density 1180
+# set PMMA density value
+set             group all volume 1.5625e-11
+# set the volume for each particle
+velocity        all set 0.0 0.0 0.0 sum no units box
+# our particles are initially still
+#velocity	    mobile set 0.0005 0.0 0.0 sum yes units box
+# velocity <groupID> <style> <args> <keyword>
+
+#--------------------------------------------------------------------------
+# VARIABLES
+
+variable        p equal "ramp(0.0 , 1.0e-13)"
+# define a variable for pressure ramp
+
+#--------------------------------------------------------------------------
+# FIXES AND COMPUTATIONS
+
+fix             F1 all nve
+# use velocity-Verlet time integrator
+fix	        	F2 constraint setforce 0.0 0.0 0.0
+# set force on each atom to fx,fy,fz
+# this erases all previously computed forces on the atom
+fix             F3 load setforce NULL NULL v_p
+# apply external load gradually
+# NULL --> that component untouched (=/= 0.0)
+
+compute         C1 all damage/atom
+# compute damage for each particle
+
+#--------------------------------------------------------------------------
+# RUN1
+# Preparation (load)
+
+timestep        0.001
+# timestep size (time units)
+thermo          100
+# output thermodynamics every N timesteps
+
+dump            1 all custom 100 dump.peri id type x y z c_C1
+# dump a file with all the information
+
+dump			2 all image 50 image.*.jpg type type axes yes 0.8 0.02 view 80 -30 adiam 0.0006
+dump_modify		2 pad 4
+# pad arg = Nchar --> # of characters to convert timestep to
+
+run             500
+# number of timesteps
