@@ -1,0 +1,23 @@
+# Ensight case file
+
+FORMAT
+type: ensight gold
+
+GEOMETRY
+model: 1 1 positions.xyz
+
+VARIABLE
+scalar per node: 1 1 Damage positions.damage
+
+TIME
+time set: 1
+number of steps: 11
+filename start number: 0
+filename increment: 1
+time values:
+0 100 200 300 400 500 600 700 800 900
+1000
+
+FILE
+file set: 1
+number of steps: 11
