@@ -17,7 +17,7 @@
 #define D 3                       // Integral dimension
 #define N 64                      // Number of intervals throughout the single dimension
 #define NCELL int(pow(N,D))       // Total number of subvolumes
-#define K 250                      // Number of points in the single subvolume for MC integration
+#define K 250                     // Number of points in the single subvolume for MC integration
 #define M K*NCELL                 // Number of total points in the whole volume. In each subvolume K=M/NCELL.
 #define KGRID 100                 // Number of cycles used to refine the grid
 #define ALPHA 0.2                 // Rate for the convergence of the grid refining (typically between 0.2 and 2)
