@@ -1,0 +1,1 @@
+# - LPSexample --> example of the LPS model for friction

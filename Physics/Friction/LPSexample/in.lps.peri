@@ -1,0 +1,460 @@
+# PERIDYNAMIC MODEL OF FRICTION by Riccardo Galbiati
+# May 28th, 2018
+# BMG plate - PMMA ball
+# For information: P Tian, Intermetallics Volume 61, pag 1-8 (2015), doi:10.1016/j.intermet.2015.02.008
+
+#--------------------------------------------------------------------------
+# INITIALIZATION
+#--------------------------------------------------------------------------
+
+units           si
+# International System units
+# NB: forces will be in Newton
+boundary        p p p
+# periodic conditions (x,y,z)
+# NB: beware the periodic conditions p p p, for they can give you trouble in PD (ceiling height)
+atom_style      peri
+# atom_style peri --> (mass, volume)
+atom_modify     map array
+# we need it as an option for storing info about positions
+neighbor        0.0001 bin
+# depth of the skin in bin interaction
+# neigh_modify    every 1 delay 0 check no
+# if you want extra control
+
+#--------------------------------------------------------------------------
+# PARAMETERS
+#--------------------------------------------------------------------------
+
+# TIME
+variable        t_step equal 0.5e-7
+# our timestep
+variable        time equal step*dt
+# current time
+variable        t_runsetup equal 6000
+# steps for the setup
+variable        t_run equal 40000
+# steps for the run
+variable        t_skip equal 200
+# step for the output
+
+############################################
+
+# PARTICLES
+variable        latt equal 0.00025
+# lattice spacing
+variable        horizon equal "3*v_latt+0.000001"
+# interaction horizon
+variable        vol equal "(v_latt^3)"
+# volume of each particle
+
+############################################
+
+# 1ST MATERIAL --> BMG Zr50Cu40Al10
+variable        dens1 equal 6860
+# density of the material
+variable        K1 equal 121e9
+# bulk modulus of the material
+variable        G1 equal 34e9 #23e9
+# shear modulus of the material
+variable        E1 equal "(9*v_K1*v_G1)/(3*v_K1+v_G1)"
+# Young's modulus of the material
+variable        Ktough1 equal 75e6 # range 25e6-100e6
+# fracture toughness of the material
+variable        Gc1 equal "((v_Ktough1)^2)/(v_E1)"
+# energy release rate of the material
+variable        sc1 equal "sqrt((v_Gc1)/((3*v_G1+((3.0/4)^4)*(v_K1-(5.0*v_G1)/3))*v_horizon))"
+# critical stretch in the PD model (LPS)
+
+############################################
+
+# 2ND MATERIAL --> PMMA
+variable        dens2 equal 1180
+# density of the material
+variable        K2 equal 3.9e9
+# bulk modulus of the material
+variable        G2 equal 0.93e9
+# shear modulus of the material
+variable        E2 equal "(9*v_K2*v_G2)/(3*v_K2+v_G2)"
+# Young's modulus of the material
+variable        Ktough2 equal 1.516e6
+# fracture toughness of the material
+variable        Gc2 equal "((v_Ktough2)^2)/(v_E2)"
+# energy release rate of the material
+variable        sc2 equal "sqrt((v_Gc2)/((3*v_G2+((3.0/4)^4)*(v_K2-(5.0*v_G2)/3))*v_horizon))"
+# critical stretch in the PD model (LPS)
+
+############################################
+# LOAD
+variable        displace equal "-1./4*v_latt"
+# displacement in terms of lattice space
+
+variable        forceLoadTotInit equal 0.0
+variable        forceLoadTotFinal equal -20.0
+# total load to apply (force)
+
+# HERE WE NEED TO ADJUST THE DISPLACE
+
+############################################
+
+# VELOCITY
+variable        loadVel equal "(v_displace)/(v_t_runsetup*v_t_step)"
+# the (loading) velocity of the upperlayer
+variable        finalVel equal 0.1
+# the final (constant) velocity for the tip
+
+#--------------------------------------------------------------------------
+# SETUP
+#--------------------------------------------------------------------------
+
+# TRIALBOX
+lattice         sc ${latt}
+# notice that units are SI
+region          trialbox block 0 0.012 0 0.012 0 0.012 units box
+# region          <ID>   block xlo xhi ylo yhi zlo zhi units lattice/box
+create_box      4 trialbox
+# create a box with 4 kinds of atoms
+
+############################################
+
+# LOWER SPECIMEN (bottom to top)
+region          constraintBMG block INF INF INF INF INF 0.0005 units box
+# constraint region
+region          fixedBMG block INF INF INF INF 0.00075 0.004 units box
+# fixed block
+
+############################################
+
+# MOVING TIP
+# half sphere
+region          tipspherePMMA sphere 0.0045 0.006 0.00725 0.00325 units box
+region          hi-slab block INF INF INF INF INF 0.00725 units box
+region         lowertipPMMA intersect 2 tipspherePMMA hi-slab
+
+# cantilever
+region          AEPMMA cylinder z 0.0045 0.006 0.00325 0.0075 0.0075 units box
+region          cantilevermiddlePMMA cylinder z 0.0045 0.006 0.00325 0.00775 0.00975 units box
+region          upperlayerPMMA cylinder z 0.0045 0.006 0.00325 0.01 0.01 units box
+
+############################################
+
+# CREATE ATOMS (bottom to top)
+create_atoms    1 region constraintBMG
+create_atoms    2 region fixedBMG
+create_atoms    3 region lowertipPMMA
+create_atoms    4 region AEPMMA
+create_atoms    3 region cantilevermiddlePMMA
+create_atoms    3 region upperlayerPMMA
+# fill the regions with atoms
+
+############################################
+
+# GROUPS (bottom to top)
+group           constraint region constraintBMG
+group           fixed region fixedBMG
+group           lowertip region lowertipPMMA
+group           AE region AEPMMA
+group           cantilevermiddle region cantilevermiddlePMMA
+group           upperlayer region upperlayerPMMA
+# group atoms in a collection which can be later treated as a whole
+# group <ID> <region> <regionID>
+
+group           lower union constraint fixed
+# lower --> the lower specimen as a whole
+group           upper union lowertip AE cantilevermiddle upperlayer
+# upper --> the upper specimen as a whole
+
+group           plainnve subtract all upperlayer
+# atoms we will use nve on
+
+#--------------------------------------------------------------------------
+# POTENTIAL
+#--------------------------------------------------------------------------
+
+pair_style      peri/lps
+# the potential used --> state-based linear peridynamic solid
+
+# BMG
+pair_coeff      1   1   ${K1}   ${G1}   ${horizon}      ${sc1}      0.25
+pair_coeff      2   2   ${K1}   ${G1}   ${horizon}      ${sc1}      0.25
+pair_coeff      1   2   ${K1}   ${G1}   ${horizon}      ${sc1}      0.25
+
+# PMMA
+pair_coeff      3   3   ${K2}   ${G2}   ${horizon}      ${sc2}      0.25
+pair_coeff      4   4   ${K2}   ${G2}   ${horizon}      ${sc2}      0.25
+pair_coeff      3   4   ${K2}   ${G2}   ${horizon}      ${sc2}      0.25
+
+# BMG - PMMA
+pair_coeff      1   3   ${K2}   ${G2}   ${horizon}      ${sc2}      0.25
+pair_coeff      1   4   ${K2}   ${G2}   ${horizon}      ${sc2}      0.25
+pair_coeff      2   3   ${K2}   ${G2}   ${horizon}      ${sc2}      0.25
+pair_coeff      2   4   ${K2}   ${G2}   ${horizon}      ${sc2}      0.25
+# pair_coeff    I   J   <Bulk>  <Shear>  <horizon>=3*lattice    <s00>   <alpha>
+
+#--------------------------------------------------------------------------
+# PROPERTIES SETUP 1
+#--------------------------------------------------------------------------
+
+set             type 1 density ${dens1}
+set             type 2 density ${dens1}
+# BMG density
+set             type 3 density ${dens2}
+set             type 4 density ${dens2}
+# PMMA density
+
+set             group all volume ${vol}
+velocity        all set 0.0 0.0 0.0 sum no units box
+# all particles still
+
+displace_atoms  fixed random 0.02 0.02 0.02 123456
+displace_atoms  lowertip random 0.02 0.02 0.02 123456
+# random displacement for particles in the lower specimen and in the tip
+
+#--------------------------------------------------------------------------
+# VARIABLES 1
+#--------------------------------------------------------------------------
+
+# COUNTING
+variable        nAll equal "count(all)"
+# number of particles in the whole trialbox
+variable        nUpperLayer equal "count(upperlayer)"
+variable        nUpper equal "count(upper)"
+variable        nFixed equal "count(fixed)"
+# number of particles in the different groups (upper tip and lower fixed)
+
+############################################
+
+# LOADING
+variable        forceLoadEachInit equal "v_forceLoadTotInit/(v_nUpperLayer+1e-99)*(1.0/v_vol)"
+variable        forceLoadEachFinal equal "v_forceLoadTotFinal/(v_nUpperLayer+1e-99)*(1.0/v_vol)"
+# load on each particle
+
+variable        forceRampLoad equal "ramp(v_forceLoadEachInit,v_forceLoadEachFinal)"
+# define a variable for load ramp
+
+variable        forceRampLoadCheck equal "v_forceRampLoad*v_nUpperLayer*v_vol"
+# check for the state of the ramp
+
+############################################
+
+# FORCES
+variable        realfx atom "fx*v_vol"
+variable        realfy atom "fy*v_vol"
+variable        realfz atom "fz*v_vol"
+# force acting on each particle
+
+############################################
+
+# DAMPING
+variable        tempdamp equal "(v_t_runsetup+v_t_runsetup+v_t_run)*dt*0.1"
+# damp coefficient (Langevin)
+
+#--------------------------------------------------------------------------
+# FIXES 1
+#--------------------------------------------------------------------------
+
+fix             F1 plainnve nve
+# use velocity-Verlet time integrator
+fix             F1TIP upperlayer nve
+# right now we can use nve even for the upperlayer
+fix             F2 constraint setforce 0.0 0.0 0.0
+# set force on each atom to fx,fy,fz
+fix             F3 upperlayer addforce 0.0 0.0 v_forceRampLoad
+# apply the load
+fix_modify      F3 energy yes
+# adjust energy
+fix             F4 all langevin 0.0 0.0 ${tempdamp} 123456789
+# damping for our particles
+
+#--------------------------------------------------------------------------
+# COMPUTATIONS 1
+#--------------------------------------------------------------------------
+
+# ENERGY
+compute         Cke all ke
+compute         Cpe all pe
+# explicit calculation of kinetic energy-potential energy
+
+variable        kenergy equal "c_Cke*v_vol"
+variable        penergy equal "c_Cpe*v_vol"
+variable        totenergy equal "v_kenergy+v_penergy"
+# variables to print
+
+############################################
+
+# C-O-M --> TIP
+# Center-of-Mass position (upper tip)
+compute         CM upper com
+variable        tempCMx equal c_CM[1]
+variable        tempCMy equal c_CM[2]
+variable        tempCMz equal c_CM[3]
+# fix print needs a variable (not a compute)
+
+# Center-of-Mass velocity (upper tip)
+compute         mychunks all chunk/atom type
+# assign each atom to its chunk
+compute         VCM all vcm/chunk mychunks
+# compute the center-of-mass velocity
+variable        vtempCMx equal c_VCM[3][1]
+variable        vtempCMy equal c_VCM[3][2]
+variable        vtempCMz equal c_VCM[3][3]
+# fix print needs a variable (not a compute)
+
+############################################
+
+# C-O-M --> AE
+# Center-of-Mass position (AE)
+compute         CM2 AE com
+variable        tempCM2x equal c_CM2[1]
+variable        tempCM2y equal c_CM2[2]
+variable        tempCM2z equal c_CM2[3]
+# fix print needs a variable (not a compute)
+
+# Center-of-Mass velocity (AE)
+variable        vtempCM2x equal c_VCM[4][1]
+variable        vtempCM2y equal c_VCM[4][2]
+variable        vtempCM2z equal c_VCM[4][3]
+# fix print needs a variable (not a compute)
+
+############################################
+
+# FORCES
+# Total force acting on the upper tip
+compute         forc upper reduce sum v_realfx v_realfy v_realfz
+variable        tempfx equal c_forc[1]
+variable        tempfy equal c_forc[2]
+variable        tempfz equal c_forc[3]
+# fix print needs a variable (not a compute)
+
+# Total force acting on the upperlayer (upper tip)
+compute         forcupperlayer upperlayer reduce sum v_realfx v_realfy v_realfz
+variable        tempupperlayerfx equal c_forcupperlayer[1]
+variable        tempupperlayerfy equal c_forcupperlayer[2]
+variable        tempupperlayerfz equal c_forcupperlayer[3]
+# fix print needs a variable (not a compute)
+
+############################################
+
+# BONDS
+# Broken bonds
+compute         Cdam all damage/atom
+variable        tempbonds atom c_Cdam
+
+# (upper tip)
+compute         bondsupper upper reduce sum v_tempbonds
+variable        bondsnormupper equal "c_bondsupper/v_nUpper"
+# fix print needs a variable (not a compute)
+
+# (lower specimen)
+compute         bondsfixed fixed reduce sum v_tempbonds
+variable        bondsnormfixed equal "c_bondsfixed/v_nFixed"
+# fix print needs a variable (not a compute)
+
+# (all)
+compute         bondsall all reduce sum v_tempbonds
+variable        bondsnormall equal "c_bondsall/v_nAll"
+# fix print needs a variable (not a compute)
+
+#--------------------------------------------------------------------------
+# OUTPUT
+#--------------------------------------------------------------------------
+
+# Checks for the different variables
+fix             Fcheck all print ${t_skip} &
+                "Gc1 = ${Gc1}    sc1 = ${sc1}    Gc2 = ${Gc2}    sc2 = ${sc2}    &
+                nFixed = ${nFixed}    nUpper = ${nUpper}    nUpperLayer = ${nUpperLayer}    nAll = ${nAll} " &
+                file "check.txt" screen "no" title "# Checks "
+
+# Bonds
+fix             Fbonds all print ${t_skip} &
+                "${time}    ${bondsnormupper}    ${bondsnormfixed}    ${bondsnormall}" &
+                file "bonds.txt" screen "no" title "# Time, BondsNormUpper, BondsNormFixed, BondsNormAll"
+
+# Energies
+fix             Fenergy all print ${t_skip} " ${time}    ${kenergy}    ${penergy}    ${totenergy}    " &
+                file "energy.txt" screen "no" title "# Time, kenergy, penergy, totenergy"
+
+# Center-of-Mass kinematics (upper tip)
+fix             FCM all print ${t_skip} "${time}    ${tempCMx}    ${tempCMy}    ${tempCMz}    ${vtempCMx}    ${vtempCMy}    ${vtempCMz}" &
+                file "tipCM.txt" screen "no" title "# Time, CM_x, CM_y, CM_z, CM_vx, CM_vy, CM_vz"
+
+# Center-of-Mass kinematics (AE)
+fix             FCM2 all print ${t_skip} "${time}    ${tempCM2x}    ${tempCM2y}    ${tempCM2z}    ${vtempCM2x}    ${vtempCM2y}    ${vtempCM2z}" &
+                file "aeCM.txt" screen "no" title "# Time, CM_x, CM_y, CM_z, CM_vx, CM_vy, CM_vz"
+
+# Friction force acting on the block (upper tip)
+fix             Fforcetip all print ${t_skip} "${time}    ${tempfx}    ${tempfy}    ${tempfz}  " &
+                file "forcetip.txt" screen "no" title "# Time, Force_x, Force_y, Force_z"
+
+# Friction force acting on the upperlayer (upper tip)
+fix             Fforceupperlayer all print ${t_skip} "${time}    ${tempupperlayerfx}    ${tempupperlayerfy}    ${tempupperlayerfz}  " &
+                file "forceupperlayer.txt" screen "no" title "# Time, Force_x, Force_y, Force_z"
+
+# fix print --> print the quantities you are interested in
+
+#--------------------------------------------------------------------------
+# RUN 1 (and DUMPS)
+#--------------------------------------------------------------------------
+
+# RUN SETUP
+timestep        ${t_step}
+# timestep size (time units --> seconds)
+
+############################################
+
+# ON-SCREEN OUTPUT
+thermo_style    custom step time v_kenergy v_penergy v_totenergy v_tempCMx v_tempCMy v_tempCMz v_tempfx v_tempfz v_forceRampLoadCheck
+# define which values we print in output
+thermo          ${t_skip}
+# output thermodynamics every N timesteps
+
+# DUMPS
+dump            D1 all custom ${t_skip} dump.peri id type x y z c_Cdam
+# dump a file with all the information
+
+############################################
+
+# RUN
+run             ${t_runsetup}
+# number of timesteps
+
+#--------------------------------------------------------------------------
+# UNFIXES 1
+#--------------------------------------------------------------------------
+
+fix_modify      F3 energy no
+unfix           F3
+# stop the ramp
+
+fix             F3bis upperlayer addforce 0.0 0.0 v_forceLoadEachFinal
+# the force now is constant
+fix_modify      F3bis energy yes
+# adjust energy
+
+#--------------------------------------------------------------------------
+# RUN 2 (and DUMPS)
+#--------------------------------------------------------------------------
+
+# RUN
+run             ${t_runsetup}
+# number of timesteps
+
+#--------------------------------------------------------------------------
+# UNFIXES 2
+#--------------------------------------------------------------------------
+
+unfix           F1TIP
+# no more nve for the upperlayer
+#fix             F1TIPbis upperlayer move linear ${finalVel} NULL 0.0 units box
+fix             F1TIPbis upperlayer move linear ${finalVel} NULL NULL units box
+# integration with a constant sliding velocity on x
+
+#--------------------------------------------------------------------------
+# RUN 3 (and DUMPS)
+#--------------------------------------------------------------------------
+
+# RUN
+run             ${t_run}
+# number of timesteps
+
+#--------------------------------------------------------------------------
